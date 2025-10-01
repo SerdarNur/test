@@ -1,0 +1,81 @@
+services:
+  scobees-v3-db:
+    image: postgres:15
+    container_name: scobees-v3-db
+    ports:
+      - '5432:5432'
+    restart: 'unless-stopped'
+    volumes:
+      - ./dump:/import
+      - ./database-scripts/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
+      - ../../.env:/app/.env:ro
+    environment:
+      POSTGRES_DB: lernbegleitung
+      POSTGRES_USER: lernbegleitung
+      POSTGRES_PASSWORD: changeMe
+    command: postgres -c 'max_connections=200'
+    env_file:
+      - ../../.env
+
+  enmeshed-connector:
+    container_name: enmeshed-connector
+    image: ghcr.io/nmshd/connector:6.23.0
+    profiles: ["enmeshed"]
+    environment:
+      debug: "true"
+      modules__coreHttpApi__docs__enabled: "true"
+      infrastructure__httpServer__enabled: "true"
+      infrastructure__httpServer__apiKey: "ycWZAaMZsW#5i!2tS@Lz6edfS4qy_fda"
+      database__connectionString: "mongodb://${ENMESHED_MONGO_USERNAME:-mongodb}:${ENMESHED_MONGO_PASSWORD:-m0ng0db}@enmeshed-mongodb:27017"
+      transportLibrary__baseUrl: "https://nmshd-bkb.demo.meinbildungsraum.de/"
+      transportLibrary__platformClientId: "CLTRprXW6fy1uP6NGOy2"
+      transportLibrary__platformClientSecret: "7nngwiMPogOVvz2sMdzrQvJfoRptJc"
+    ports:
+      - 8081:80
+    volumes:
+      - enmeshed_logs:/var/log/enmeshed-connector
+    depends_on:
+      - enmeshed-mongodb
+
+  enmeshed-mongodb:
+    container_name: enmeshed-mongodb
+    image: mongo:latest
+    profiles: ["enmeshed"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${ENMESHED_MONGO_USERNAME:-mongodb}
+      MONGO_INITDB_ROOT_PASSWORD: ${ENMESHED_MONGO_PASSWORD:-m0ng0db}
+    volumes:
+      - mongodb_data:/data/db
+
+  keycloak:
+    image: keycloak/keycloak:22.0.5
+    container_name: keycloak
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_USER:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_PASSWORD:-nimda}
+      KEYCLOAK_LOGLEVEL: ${KEYCLOAK_LOGLEVEL:-DEBUG}
+      ROOT_LOGLEVEL: ${KEYCLOAK_ROOT_LOGLEVEL:-DEBUG}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./keycloak/:/tmp/etc/
+      - ./keycloak/providers:/opt/keycloak/providers
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+          /opt/keycloak/bin/kc.sh import --file /tmp/etc/realm-export.json
+          /opt/keycloak/bin/kc.sh start-dev
+
+  redis:
+    image: redis:8.0
+    ports:
+      - '6379:6379'
+    command: redis-server --save ${REDIS_SAVE_SECONDS:-20} ${REDIS_SAVE_CHANGES:-1} --loglevel ${REDIS_LOGLEVEL:-warning}
+    volumes:
+      - redis_data:/data
+
+volumes:
+  mongodb_data:
+  enmeshed_logs:
+  redis_data:
